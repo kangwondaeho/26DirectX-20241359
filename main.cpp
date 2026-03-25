@@ -8,6 +8,9 @@
 #include <windows.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>
+#include <iostream>
+#include <thread>
+#include "CPPGameTimer.h"
 
  // 라이브러리 링크
 #pragma comment(lib, "d3d11.lib")
@@ -36,21 +39,16 @@ struct Vertex {
     float r, g, b, a;
 };
 
-Vertex g_vertices[12] = {
-        {  0.0f,  0.5f, 0.5f, 1.0f, 0.0f, 0.0f, 1.0f },
-        {  0.5f, -0.5f, 0.5f, 0.0f, 1.0f, 0.0f, 1.0f },
-        {  0.5f, -0.5f, 0.5f, 0.0f, 1.0f, 0.0f, 1.0f },
-        { -0.5f, -0.5f, 0.5f, 0.0f, 0.0f, 1.0f, 1.0f },
-        { -0.5f, -0.5f, 0.5f, 0.0f, 0.0f, 1.0f, 1.0f },
-        {  0.0f,  0.5f, 0.5f, 1.0f, 0.0f, 0.0f, 1.0f },
+Vertex g_vertices[6] = {
+    // 1. 정방향 삼각형 (위쪽을 향함) - 시계 방향으로 배치
+    {  0.0f,       0.5f,  0.5f,   1.0f, 0.0f, 0.0f, 1.0f }, // 위쪽 꼭짓점
+    {  0.433013f, -0.25f, 0.5f,   0.0f, 1.0f, 0.0f, 1.0f }, // 오른쪽 아래
+    { -0.433013f, -0.25f, 0.5f,   0.0f, 0.0f, 1.0f, 1.0f }, // 왼쪽 아래
 
-        {  0.0f,  -0.75f, 0.5f, 1.0f, 0.0f, 0.0f, 1.0f },
-        {  0.5f,  0.25f, 0.5f, 0.0f, 1.0f, 0.0f, 1.0f },
-        {  0.5f,  0.25f, 0.5f, 0.0f, 1.0f, 0.0f, 1.0f },
-        {  -0.5f,  0.25f, 0.5f, 0.0f, 0.0f, 1.0f, 1.0f },
-        {  -0.5f,  0.25f, 0.5f, 0.0f, 0.0f, 1.0f, 1.0f },
-        {  0.0f,  -0.75f, 0.5f, 1.0f, 0.0f, 0.0f, 1.0f },
-
+    // 2. 역방향 삼각형 (아래쪽을 향함) - 시계 방향으로 배치
+    {  0.0f,      -0.5f,  0.5f,   1.0f, 0.0f, 0.0f, 1.0f }, // 아래쪽 꼭짓점
+    { -0.433013f,  0.25f, 0.5f,   0.0f, 1.0f, 0.0f, 1.0f }, // 왼쪽 위
+    {  0.433013f,  0.25f, 0.5f,   0.0f, 0.0f, 1.0f, 1.0f }, // 오른쪽 위
 };
 
 // HLSL 셰이더 (이전 예제와 동일)
@@ -72,12 +70,6 @@ float4 PS(PS_INPUT input) : SV_Target { return input.col; }
  */
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
-    case WM_KEYDOWN:
-        if (wParam == VK_LEFT) g_offsetX -= 0.1f;
-        if (wParam == VK_RIGHT) g_offsetX += 0.1f;
-        if (wParam == VK_UP) g_offsetY += 0.1f;
-        if (wParam == VK_DOWN) g_offsetY -= 0.1f;
-        break;
     case WM_DESTROY: // 창이 닫힐 때 발생하는 메시지
         PostQuitMessage(0);
         break;
@@ -100,7 +92,13 @@ void ProcessInput() {
 }
 
 
-void Update() {
+void Update(float dt) {
+    float speed = 1.0f;
+    if (GetAsyncKeyState('A') & 0x8000)  g_offsetX -= speed * dt;
+    if (GetAsyncKeyState('D') & 0x8000) g_offsetX += speed * dt;
+    if (GetAsyncKeyState('W') & 0x8000)    g_offsetY += speed * dt;
+    if (GetAsyncKeyState('S') & 0x8000)  g_offsetY -= speed * dt;
+
     // 추가: 새로운 개념 없이, 기존 버퍼를 해제하고 이동된 좌표로 다시 '생성(Create)'함
     if (g_pVBuffer) g_pVBuffer->Release();
 
@@ -116,24 +114,43 @@ void Update() {
     g_pd3dDevice->CreateBuffer(&bd, &initData, &g_pVBuffer); // 기존에 쓰신 CreateBuffer 함수 그대로 사용
 }
 
-void Render() {
+void Render(float dt) {
+    // --- [1. FPS 측정 및 연속 출력 (시간 손실 방지)] ---
+    static float timeElapsed = 0.0f;
+    static int frameCount = 0;
+    static int lastFPS = 0; // 1초마다 갱신된 FPS 값을 저장할 변수
+
+    timeElapsed += dt;
+    frameCount++;
+
+    // 1초가 지났을 때만 FPS 값 갱신
+    if (timeElapsed >= 1.0f) {
+        lastFPS = frameCount; // 1초 동안 누적된 프레임 수를 저장
+        timeElapsed -= 1.0f;  // 0으로 강제 초기화하지 않고 1.0f만 빼서 자투리 시간 보존 (시간 손실 방지)
+        frameCount = 0;
+    }
+
+    // 매 프레임마다 연속해서 출력 (FPS는 저장된 lastFPS 사용, 델타타임은 현재 dt 사용)
+    // \r 을 사용하여 줄바꿈 없이 제자리에서 덮어쓰기 (콘솔 스크롤 부하 방지)
+    printf("\r현재 FPS: %4d | Delta Time: %8.6f sec", lastFPS, dt);
+
     // --- 렌더링 시작 ---
     float clearColor[] = { 0.1f, 0.2f, 0.3f, 1.0f };
     g_pImmediateContext->ClearRenderTargetView(g_pRenderTargetView, clearColor);
 
     g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
-    D3D11_VIEWPORT vp = { 0, 0, 800, 600, 0.0f, 1.0f };
+    D3D11_VIEWPORT vp = { 0, 0, 600, 600, 0.0f, 1.0f };
     g_pImmediateContext->RSSetViewports(1, &vp);
 
     g_pImmediateContext->IASetInputLayout(g_pInputLayout);
     UINT stride = sizeof(Vertex), offset = 0;
     g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pVBuffer, &stride, &offset);
-    g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);
+    g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
     g_pImmediateContext->VSSetShader(g_vShader, nullptr, 0);
     g_pImmediateContext->PSSetShader(g_pShader, nullptr, 0);
 
-    g_pImmediateContext->Draw(12, 0);
+    g_pImmediateContext->Draw(6, 0);
     g_pSwapChain->Present(0, 0);
 }
 
@@ -148,9 +165,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     wcex.lpszClassName = L"DX11Win32Class";
     RegisterClassEx(&wcex);
 
+    RECT rc = { 0, 0, 600, 600 };
+
+    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+
     // 2. 실제 윈도우 생성
     HWND hWnd = CreateWindow(L"DX11Win32Class", L"Win32 + DirectX 11 게임루프로 육망성 움직이기",
-        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 800, 600, nullptr, nullptr, hInstance, nullptr);
+        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, hInstance, nullptr);
 
     if (!hWnd) return -1;
     ShowWindow(hWnd, nCmdShow);
@@ -158,7 +179,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // 3. DirectX 11 초기화 (Win32 HWND 연결)
     DXGI_SWAP_CHAIN_DESC sd = {};
     sd.BufferCount = 1;
-    sd.BufferDesc.Width = 800;
+    sd.BufferDesc.Width = 600;
     sd.BufferDesc.Height = 600;
     sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
@@ -199,11 +220,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     D3D11_SUBRESOURCE_DATA initData = { g_vertices, 0, 0 };
     g_pd3dDevice->CreateBuffer(&bd, &initData, &g_pVBuffer);
 
+    CPPGameTimer timer;
+
     //게임 루프
     while (g_isRunning) {
+
+        float dt = timer.Update();
+
         ProcessInput();
-        Update();
-        Render();
+        Update(dt);
+        Render(dt);
     }
 
     // 자원 해제
