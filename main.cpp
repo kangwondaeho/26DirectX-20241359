@@ -11,11 +11,56 @@
 #include <iostream>
 #include <thread>
 #include "CPPGameTimer.h"
+#include <vector> 
+#include <string>
 
  // 라이브러리 링크
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
+
+// [1단계: 컴포넌트 기저 클래스]
+// 모든 기능(이동, 렌더링 등)은 이 클래스를 상속받아야 함.
+class Component {
+public:
+    class GameObject* pOwner; // 이 기능이 누구의 것인지 저장
+    bool isStarted = false;           // Start()가 실행되었는지 체크
+
+    virtual void Start() = 0;              // 초기화
+    virtual void OnInput() {}              // 입력 (선택사항)
+    virtual void OnUpdate(float dt) = 0;    // 로직 (필수)
+    virtual void OnRender() {}             // 그리기 (선택사항)
+
+    virtual ~Component() {}
+};
+
+// [2단계: 게임 오브젝트 클래스]
+// 컴포넌트들을 담는 바구니 역할을 함.
+class GameObject {
+public:
+    std::string name;
+    std::vector<Component*> components;
+
+    GameObject(std::string n) {
+        name = n;
+    }
+
+    // 객체가 죽을 때 담고 있던 컴포넌트들도 메모리에서 해제함
+    ~GameObject() {
+        for (int i = 0; i < (int)components.size(); i++) {
+            delete components[i];
+        }
+    }
+
+    // 새로운 기능을 추가하는 함수
+    void AddComponent(Component* pComp) {
+        pComp->pOwner = this;
+        pComp->isStarted = false;
+        components.push_back(pComp);
+    }
+};
+
+
 
 // 전역 변수 (간결한 예제를 위해 사용)
 ID3D11Device* g_pd3dDevice = nullptr;                  //모든 리소스의 생성을 담당하는 핵심 객체임. 하드웨어(GPU)와의 통로 역할을 하며, 실질적으로 메모리를 할당하는 기능을 가짐.
@@ -28,9 +73,6 @@ ID3D11InputLayout* g_pInputLayout;
 ID3D11VertexShader* g_vShader;
 ID3D11PixelShader* g_pShader;
 
-//이동 전역변수
-float g_offsetX = 0.0f;
-float g_offsetY = 0.0f;
 bool g_isRunning = true;
 
 // 정점 구조체
@@ -79,8 +121,90 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     return 0;
 }
 
+class MeshRenderer : public Component {
+public:
+    void Start() override {}
+    void OnUpdate(float dt) override {}
+
+    void OnRender() override {
+        g_pImmediateContext->IASetInputLayout(g_pInputLayout);
+        UINT stride = sizeof(Vertex), offset = 0;
+        g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pVBuffer, &stride, &offset);
+        g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+        g_pImmediateContext->VSSetShader(g_vShader, nullptr, 0);
+        g_pImmediateContext->PSSetShader(g_pShader, nullptr, 0);
+
+        g_pImmediateContext->Draw(6, 0);
+    }
+};
+
+class Transform : public Component {
+public:
+    float x = 0.0f;
+    float y = 0.0f;
+    float speed = 1.0f;
+
+    void Start() override {}
+
+    void OnUpdate(float dt) override {
+        // 1. 자신의 좌표 이동 로직
+        if (GetAsyncKeyState('A') & 0x8000) x -= speed * dt;
+        if (GetAsyncKeyState('D') & 0x8000) x += speed * dt;
+        if (GetAsyncKeyState('W') & 0x8000) y += speed * dt;
+        if (GetAsyncKeyState('S') & 0x8000) y -= speed * dt;
+
+        // 2. 이동한 좌표를 바탕으로 GPU 버퍼 갱신 (전역 Device 변수 사용)
+        if (g_pVBuffer) g_pVBuffer->Release();
+
+        Vertex currentVertices[6];
+        for (int i = 0; i < 6; ++i) {
+            currentVertices[i] = g_vertices[i];
+            currentVertices[i].x += x; // 자기 자신의 x값을 더함
+            currentVertices[i].y += y; // 자기 자신의 y값을 더함
+        }
+
+        D3D11_BUFFER_DESC bd = { sizeof(currentVertices), D3D11_USAGE_DEFAULT, D3D11_BIND_VERTEX_BUFFER, 0, 0, 0 };
+        D3D11_SUBRESOURCE_DATA initData = { currentVertices, 0, 0 };
+        g_pd3dDevice->CreateBuffer(&bd, &initData, &g_pVBuffer);
+    }
+};
+
+class infoDisplay : public Component {
+
+private:
+    float timeElapsed = 0.0f;
+    int frameCount = 0;
+    int lastFPS = 0;
+
+public:
+    void Start() override {
+        timeElapsed = 0.0f;
+        frameCount = 0;
+        lastFPS = 0;
+    }
+
+    void OnUpdate(float dt) override {
+        // --- [1. FPS 측정 및 연속 출력 (시간 손실 방지)] ---
+        timeElapsed += dt;
+        frameCount++;
+    // 1초가 지났을 때만 FPS 값 갱신
+        if (timeElapsed >= 1.0f) {
+            lastFPS = frameCount; // 1초 동안 누적된 프레임 수를 저장
+            timeElapsed -= 1.0f;  // 0으로 강제 초기화하지 않고 1.0f만 빼서 자투리 시간 보존 (시간 손실 방지)
+            frameCount = 0;
+        }
+
+        // 매 프레임마다 연속해서 출력 (FPS는 저장된 lastFPS 사용, 델타타임은 현재 dt 사용)
+        // \r 을 사용하여 줄바꿈 없이 제자리에서 덮어쓰기 (콘솔 스크롤 부하 방지)
+        printf("\r현재 FPS: %4d | Delta Time: %8.6f sec", lastFPS, dt);
+    }
+    void OnRender() override {}
+    
+};
+
 //입력단계
-void ProcessInput() {
+void ProcessInput(std::vector<GameObject*>& gameWorld) {
     MSG msg = { 0 };
     while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
         if (msg.message == WM_QUIT) {
@@ -89,50 +213,30 @@ void ProcessInput() {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+
+    for (int i = 0; i < (int)gameWorld.size(); i++) {
+        for (int j = 0; j < (int)gameWorld[i]->components.size(); j++) {
+            gameWorld[i]->components[j]->OnInput();
+        }
+    }
 }
 
 
-void Update(float dt) {
-    float speed = 1.0f;
-    if (GetAsyncKeyState('A') & 0x8000)  g_offsetX -= speed * dt;
-    if (GetAsyncKeyState('D') & 0x8000) g_offsetX += speed * dt;
-    if (GetAsyncKeyState('W') & 0x8000)    g_offsetY += speed * dt;
-    if (GetAsyncKeyState('S') & 0x8000)  g_offsetY -= speed * dt;
+void Update(float dt, std::vector<GameObject*>& gameWorld) {
 
-    // 추가: 새로운 개념 없이, 기존 버퍼를 해제하고 이동된 좌표로 다시 '생성(Create)'함
-    if (g_pVBuffer) g_pVBuffer->Release();
-
-    Vertex currentVertices[12];
-    for (int i = 0; i < 12; ++i) {
-        currentVertices[i] = g_vertices[i];      // 원본 유지
-        currentVertices[i].x += g_offsetX;     // X 이동
-        currentVertices[i].y += g_offsetY;     // Y 이동
+    for (int i = 0; i < (int)gameWorld.size(); i++) {
+        for (int j = 0; j < (int)gameWorld[i]->components.size(); j++) {
+            // Start()가 호출된 적 없다면 여기서 호출 (유니티 방식)
+            if (gameWorld[i]->components[j]->isStarted == false) {
+                gameWorld[i]->components[j]->Start();
+                gameWorld[i]->components[j]->isStarted = true;
+            }
+            gameWorld[i]->components[j]->OnUpdate(dt);
+        }
     }
-
-    D3D11_BUFFER_DESC bd = { sizeof(currentVertices), D3D11_USAGE_DEFAULT, D3D11_BIND_VERTEX_BUFFER, 0, 0, 0 };
-    D3D11_SUBRESOURCE_DATA initData = { currentVertices, 0, 0 };
-    g_pd3dDevice->CreateBuffer(&bd, &initData, &g_pVBuffer); // 기존에 쓰신 CreateBuffer 함수 그대로 사용
 }
 
-void Render(float dt) {
-    // --- [1. FPS 측정 및 연속 출력 (시간 손실 방지)] ---
-    static float timeElapsed = 0.0f;
-    static int frameCount = 0;
-    static int lastFPS = 0; // 1초마다 갱신된 FPS 값을 저장할 변수
-
-    timeElapsed += dt;
-    frameCount++;
-
-    // 1초가 지났을 때만 FPS 값 갱신
-    if (timeElapsed >= 1.0f) {
-        lastFPS = frameCount; // 1초 동안 누적된 프레임 수를 저장
-        timeElapsed -= 1.0f;  // 0으로 강제 초기화하지 않고 1.0f만 빼서 자투리 시간 보존 (시간 손실 방지)
-        frameCount = 0;
-    }
-
-    // 매 프레임마다 연속해서 출력 (FPS는 저장된 lastFPS 사용, 델타타임은 현재 dt 사용)
-    // \r 을 사용하여 줄바꿈 없이 제자리에서 덮어쓰기 (콘솔 스크롤 부하 방지)
-    printf("\r현재 FPS: %4d | Delta Time: %8.6f sec", lastFPS, dt);
+void Render(float dt, std::vector<GameObject*>& gameWorld) {
 
     // --- 렌더링 시작 ---
     float clearColor[] = { 0.1f, 0.2f, 0.3f, 1.0f };
@@ -142,15 +246,12 @@ void Render(float dt) {
     D3D11_VIEWPORT vp = { 0, 0, 600, 600, 0.0f, 1.0f };
     g_pImmediateContext->RSSetViewports(1, &vp);
 
-    g_pImmediateContext->IASetInputLayout(g_pInputLayout);
-    UINT stride = sizeof(Vertex), offset = 0;
-    g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pVBuffer, &stride, &offset);
-    g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    for (int i = 0; i < (int)gameWorld.size(); i++) {
+        for (int j = 0; j < (int)gameWorld[i]->components.size(); j++) {
+            gameWorld[i]->components[j]->OnRender();
+        }
+    }
 
-    g_pImmediateContext->VSSetShader(g_vShader, nullptr, 0);
-    g_pImmediateContext->PSSetShader(g_pShader, nullptr, 0);
-
-    g_pImmediateContext->Draw(6, 0);
     g_pSwapChain->Present(0, 0);
 }
 
@@ -220,6 +321,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     D3D11_SUBRESOURCE_DATA initData = { g_vertices, 0, 0 };
     g_pd3dDevice->CreateBuffer(&bd, &initData, &g_pVBuffer);
 
+    std::vector<GameObject*> gameWorld;
+
+    GameObject* player = new GameObject("Player");
+    player->AddComponent(new Transform());
+    player->AddComponent(new MeshRenderer());
+    gameWorld.push_back(player);
+
+    GameObject* sysInfo = new GameObject("SystemManager");
+    player->AddComponent(new infoDisplay());
+    gameWorld.push_back(player);
+
     CPPGameTimer timer;
 
     //게임 루프
@@ -227,9 +339,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
         float dt = timer.Update();
 
-        ProcessInput();
-        Update(dt);
-        Render(dt);
+        ProcessInput(gameWorld);
+        Update(dt, gameWorld);
+        Render(dt, gameWorld);
     }
 
     // 자원 해제
