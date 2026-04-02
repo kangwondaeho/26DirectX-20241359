@@ -19,6 +19,8 @@
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 
+class GameObject;
+
 // [1단계: 컴포넌트 기저 클래스]
 // 모든 기능(이동, 렌더링 등)은 이 클래스를 상속받아야 함.
 class Component {
@@ -39,7 +41,11 @@ public:
 class GameObject {
 public:
     std::string name;
+    float x = 0.0f; //GameObject 클래스는 위치(Position) 정보를 가지며, 부착된 Component들의 Update와 Render를 일괄 호출해야 합니다.
+    float y = 0.0f;//GameObject 클래스는 위치(Position) 정보를 가지며, 부착된 Component들의 Update와 Render를 일괄 호출해야 합니다.
     std::vector<Component*> components;
+
+    ID3D11Buffer* pVBuffer = nullptr;
 
     GameObject(std::string n) {
         name = n;
@@ -50,6 +56,7 @@ public:
         for (int i = 0; i < (int)components.size(); i++) {
             delete components[i];
         }
+        if (pVBuffer) pVBuffer->Release();
     }
 
     // 새로운 기능을 추가하는 함수
@@ -68,10 +75,9 @@ ID3D11DeviceContext* g_pImmediateContext = nullptr;     //생성된 리소스를 사용하
 IDXGISwapChain* g_pSwapChain = nullptr;                 //그려진 그림을 모니터 화면으로 전달하고 관리하는 시스템임. 더블 버퍼링(Double Buffering) 기술의 실체라고 보면 됨.
 ID3D11RenderTargetView* g_pRenderTargetView = nullptr;  //GPU가 결과물을 써 내려갈 대상(Target)을 정의하는 '뷰(View)' 객체임. DX11에서는 리소스(Texture2D)를 직접 파이프라인에 꽂지 않음. 대신 그 리소스를 어떤 용도(렌더 타겟용, 셰이더 읽기용 등)로 쓸 것인지 정의하는 'View'를 통해 접근함.
 
-ID3D11Buffer* g_pVBuffer;
-ID3D11InputLayout* g_pInputLayout;
-ID3D11VertexShader* g_vShader;
-ID3D11PixelShader* g_pShader;
+ID3D11InputLayout* g_pInputLayout = nullptr;
+ID3D11VertexShader* g_vShader = nullptr;
+ID3D11PixelShader* g_pShader = nullptr;
 
 bool g_isRunning = true;
 
@@ -81,16 +87,16 @@ struct Vertex {
     float r, g, b, a;
 };
 
-Vertex g_vertices[6] = {
-    // 1. 정방향 삼각형 (위쪽을 향함) - 시계 방향으로 배치
-    {  0.0f,       0.5f,  0.5f,   1.0f, 0.0f, 0.0f, 1.0f }, // 위쪽 꼭짓점
-    {  0.433013f, -0.25f, 0.5f,   0.0f, 1.0f, 0.0f, 1.0f }, // 오른쪽 아래
-    { -0.433013f, -0.25f, 0.5f,   0.0f, 0.0f, 1.0f, 1.0f }, // 왼쪽 아래
+Vertex g_tri1[3] = {
+    {  0.0f,       0.5f,  0.5f,   0.0f, 0.0f, 1.0f, 1.0f },
+    {  0.433013f, -0.25f, 0.5f,   0.0f, 0.0f, 1.0f, 1.0f },
+    { -0.433013f, -0.25f, 0.5f,   0.0f, 0.0f, 1.0f, 1.0f }
+};
 
-    // 2. 역방향 삼각형 (아래쪽을 향함) - 시계 방향으로 배치
-    {  0.0f,      -0.5f,  0.5f,   1.0f, 0.0f, 0.0f, 1.0f }, // 아래쪽 꼭짓점
-    { -0.433013f,  0.25f, 0.5f,   0.0f, 1.0f, 0.0f, 1.0f }, // 왼쪽 위
-    {  0.433013f,  0.25f, 0.5f,   0.0f, 0.0f, 1.0f, 1.0f }, // 오른쪽 위
+Vertex g_tri2[3] = {
+    {  0.0f,      -0.5f,  0.5f,   1.0f, 0.5f, 0.0f, 1.0f },
+    { -0.433013f,  0.25f, 0.5f,   1.0f, 0.5f, 0.0f, 1.0f },
+    {  0.433013f,  0.25f, 0.5f,   1.0f, 0.5f, 0.0f, 1.0f }
 };
 
 // HLSL 셰이더 (이전 예제와 동일)
@@ -112,6 +118,20 @@ float4 PS(PS_INPUT input) : SV_Target { return input.col; }
  */
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
+    case WM_KEYDOWN:
+        if (wParam == VK_ESCAPE) {
+            // ESC 키: 윈도우 종료 메시지 큐에 삽입 (이후 WM_QUIT 발생 -> 루프 탈출)
+            PostQuitMessage(0);
+        }
+        else if (wParam == 'F') {
+            // F 키: 전체화면 / 창모드 토글
+            if (g_pSwapChain) {
+                BOOL isFullScreen = FALSE;
+                g_pSwapChain->GetFullscreenState(&isFullScreen, nullptr);
+                g_pSwapChain->SetFullscreenState(!isFullScreen, nullptr); // 상태 반전
+            }
+        }
+        break;
     case WM_DESTROY: // 창이 닫힐 때 발생하는 메시지
         PostQuitMessage(0);
         break;
@@ -127,46 +147,70 @@ public:
     void OnUpdate(float dt) override {}
 
     void OnRender() override {
+        if (!pOwner->pVBuffer) return;
         g_pImmediateContext->IASetInputLayout(g_pInputLayout);
         UINT stride = sizeof(Vertex), offset = 0;
-        g_pImmediateContext->IASetVertexBuffers(0, 1, &g_pVBuffer, &stride, &offset);
+        g_pImmediateContext->IASetVertexBuffers(0, 1, &pOwner->pVBuffer, &stride, &offset);
         g_pImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
         g_pImmediateContext->VSSetShader(g_vShader, nullptr, 0);
         g_pImmediateContext->PSSetShader(g_pShader, nullptr, 0);
 
-        g_pImmediateContext->Draw(6, 0);
+        g_pImmediateContext->Draw(3, 0);
     }
 };
 
 class Transform : public Component {
 public:
-    float x = 0.0f;
-    float y = 0.0f;
-    float speed = 1.0f;
+    float velocity = 1.0f;
+
+    bool moveUp = false, moveDown = false, moveLeft = false, moveRight = false;
+
+    int playerType = 0;
+
+    Transform(int type) { playerType = type; }
 
     void Start() override {}
 
+    void OnInput() override {
+        if (playerType == 0) {
+            moveLeft = (GetAsyncKeyState(VK_LEFT) & 0x8000);
+            moveRight = (GetAsyncKeyState(VK_RIGHT) & 0x8000);
+            moveUp = (GetAsyncKeyState(VK_UP) & 0x8000);
+            moveDown = (GetAsyncKeyState(VK_DOWN) & 0x8000);
+        }
+        else {
+            moveLeft = (GetAsyncKeyState('A') & 0x8000);
+            moveRight = (GetAsyncKeyState('D') & 0x8000);
+            moveUp = (GetAsyncKeyState('W') & 0x8000);
+            moveDown = (GetAsyncKeyState('S') & 0x8000);
+        }
+    }
+
     void OnUpdate(float dt) override {
         // 1. 자신의 좌표 이동 로직
-        if (GetAsyncKeyState('A') & 0x8000) x -= speed * dt;
-        if (GetAsyncKeyState('D') & 0x8000) x += speed * dt;
-        if (GetAsyncKeyState('W') & 0x8000) y += speed * dt;
-        if (GetAsyncKeyState('S') & 0x8000) y -= speed * dt;
+        if (moveLeft)  pOwner->x -= velocity * dt;
+        if (moveRight) pOwner->x += velocity * dt;
+        if (moveUp)    pOwner->y += velocity * dt;
+        if (moveDown)  pOwner->y -= velocity * dt;
 
         // 2. 이동한 좌표를 바탕으로 GPU 버퍼 갱신 (전역 Device 변수 사용)
-        if (g_pVBuffer) g_pVBuffer->Release();
+        if (pOwner->pVBuffer) pOwner->pVBuffer->Release();
 
-        Vertex currentVertices[6];
-        for (int i = 0; i < 6; ++i) {
-            currentVertices[i] = g_vertices[i];
-            currentVertices[i].x += x; // 자기 자신의 x값을 더함
-            currentVertices[i].y += y; // 자기 자신의 y값을 더함
+        Vertex currentVertices[3];
+
+        Vertex* baseVertices = (playerType == 0) ? g_tri1 : g_tri2;
+
+        for (int i = 0; i < 3; ++i) {
+            currentVertices[i] = baseVertices[i];
+            currentVertices[i].x *= 0.75;
+            currentVertices[i].x += pOwner->x; // 자기 자신의 x값을 더함
+            currentVertices[i].y += pOwner->y; // 자기 자신의 y값을 더함
         }
 
         D3D11_BUFFER_DESC bd = { sizeof(currentVertices), D3D11_USAGE_DEFAULT, D3D11_BIND_VERTEX_BUFFER, 0, 0, 0 };
         D3D11_SUBRESOURCE_DATA initData = { currentVertices, 0, 0 };
-        g_pd3dDevice->CreateBuffer(&bd, &initData, &g_pVBuffer);
+        g_pd3dDevice->CreateBuffer(&bd, &initData, &pOwner->pVBuffer);
     }
 };
 
@@ -239,11 +283,11 @@ void Update(float dt, std::vector<GameObject*>& gameWorld) {
 void Render(float dt, std::vector<GameObject*>& gameWorld) {
 
     // --- 렌더링 시작 ---
-    float clearColor[] = { 0.1f, 0.2f, 0.3f, 1.0f };
+    float clearColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
     g_pImmediateContext->ClearRenderTargetView(g_pRenderTargetView, clearColor);
 
     g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
-    D3D11_VIEWPORT vp = { 0, 0, 600, 600, 0.0f, 1.0f };
+    D3D11_VIEWPORT vp = { 0, 0, 800, 600, 0.0f, 1.0f };
     g_pImmediateContext->RSSetViewports(1, &vp);
 
     for (int i = 0; i < (int)gameWorld.size(); i++) {
@@ -266,13 +310,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     wcex.lpszClassName = L"DX11Win32Class";
     RegisterClassEx(&wcex);
 
-    RECT rc = { 0, 0, 600, 600 };
+    RECT rc = { 0, 0, 800, 600 };
 
-    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+    AdjustWindowRect(&rc, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE);
 
     // 2. 실제 윈도우 생성
-    HWND hWnd = CreateWindow(L"DX11Win32Class", L"Win32 + DirectX 11 게임루프로 육망성 움직이기",
-        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, hInstance, nullptr);
+    HWND hWnd = CreateWindow(L"DX11Win32Class", L" 지옥의 ESC 키: 프로그램 즉시 종료 및 관련 메모리 해제. - 지옥의 F 키: 창 모드(Windowed)와 전체 화면(Full Screen) 모드를 전환(Toggle)",
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, hInstance, nullptr);
 
     if (!hWnd) return -1;
     ShowWindow(hWnd, nCmdShow);
@@ -280,7 +324,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // 3. DirectX 11 초기화 (Win32 HWND 연결)
     DXGI_SWAP_CHAIN_DESC sd = {};
     sd.BufferCount = 1;
-    sd.BufferDesc.Width = 600;
+    sd.BufferDesc.Width = 800;
     sd.BufferDesc.Height = 600;
     sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
@@ -314,23 +358,24 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     g_pd3dDevice->CreateInputLayout(layout, 2, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), &g_pInputLayout);
 
-    // Vertex Buffer
-
-
-    D3D11_BUFFER_DESC bd = { sizeof(g_vertices), D3D11_USAGE_DEFAULT, D3D11_BIND_VERTEX_BUFFER, 0, 0, 0 };
-    D3D11_SUBRESOURCE_DATA initData = { g_vertices, 0, 0 };
-    g_pd3dDevice->CreateBuffer(&bd, &initData, &g_pVBuffer);
 
     std::vector<GameObject*> gameWorld;
 
-    GameObject* player = new GameObject("Player");
-    player->AddComponent(new Transform());
-    player->AddComponent(new MeshRenderer());
-    gameWorld.push_back(player);
+    // Player 1 생성 (방향키 조작)
+    GameObject* player1 = new GameObject("Player 1");
+    player1->AddComponent(new Transform(0)); // 0번 타입
+    player1->AddComponent(new MeshRenderer());
+    gameWorld.push_back(player1);
+
+    // Player 2 생성 (WASD 조작)
+    GameObject* player2 = new GameObject("Player 2");
+    player2->AddComponent(new Transform(1)); // 1번 타입
+    player2->AddComponent(new MeshRenderer());
+    gameWorld.push_back(player2);
 
     GameObject* sysInfo = new GameObject("SystemManager");
-    player->AddComponent(new infoDisplay());
-    gameWorld.push_back(player);
+    sysInfo->AddComponent(new infoDisplay());
+    gameWorld.push_back(sysInfo);
 
     CPPGameTimer timer;
 
@@ -344,8 +389,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         Render(dt, gameWorld);
     }
 
+    for (int i = 0; i < (int)gameWorld.size(); i++) {
+        delete gameWorld[i];
+    }
+    gameWorld.clear();
+
     // 자원 해제
-    if (g_pVBuffer) g_pVBuffer->Release();
     if (g_pInputLayout) g_pInputLayout->Release();
     if (g_vShader) g_vShader->Release();
     if (g_pShader) g_pShader->Release();
