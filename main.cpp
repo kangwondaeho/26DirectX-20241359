@@ -125,76 +125,6 @@ WORD g_sphereIndices[] = {
     4, 9, 5,    2, 4, 11,  6, 2, 10,  8, 6, 7,   9, 8, 1
 };
 
-// HLSL 셰이더 (이전 예제와 동일)
-const char* shaderSource = R"(
-// [추가 및 수정] CPU에서 넘겨주는 상수 버퍼 (b0 레지스터 사용)
-cbuffer ConstantBuffer : register(b0) {
-    matrix WorldViewProj;
-    matrix World;          // 법선(Normal)을 월드 공간으로 변환하기 위해 필요
-    float3 LightDir;       // 조명 방향 (빛이 날아가는 방향의 역벡터)
-    float padding1;
-    float3 ViewPos;        // 카메라의 월드 위치 (하이라이트 계산용)
-    float padding2;
-}
-
-struct VS_INPUT { 
-    float3 pos : POSITION; 
-    float3 normal : NORMAL; // [추가] 빛 계산을 위한 법선(Normal) 벡터
-    float4 col : COLOR; 
-};
-
-struct PS_INPUT { 
-    float4 pos : SV_POSITION; 
-    float3 worldPos : POSITION; // [추가] 픽셀의 월드 좌표
-    float3 normal : NORMAL;     // [추가] 픽셀의 월드 법선
-    float4 col : COLOR; 
-};
-
-PS_INPUT VS(VS_INPUT input) {
-    PS_INPUT output;
-    
-    // 정점 위치에 월드*뷰*투영 행렬을 곱하여 3D 공간을 2D 화면으로 투영
-    output.pos = mul(float4(input.pos, 1.0f), WorldViewProj);
-    
-    // [추가] 월드 공간에서의 위치와 법선 계산
-    output.worldPos = mul(float4(input.pos, 1.0f), World).xyz;
-    // 법선은 이동(Translation)의 영향을 받지 않도록 w값을 0으로 설정
-    output.normal = normalize(mul(float4(input.normal, 0.0f), World).xyz); 
-    
-    output.col = input.col;
-    return output;
-}
-
-float4 PS(PS_INPUT input) : SV_Target { 
-    // 정규화된 법선, 조명, 시야 벡터
-    float3 N = normalize(input.normal);
-    float3 L = normalize(LightDir); 
-    float3 V = normalize(ViewPos - input.worldPos);
-    
-    // 1. N dot L을 계산하고 [-1, 1] 범위를 [0, 1] 범위로 변환
-    float NdotL = dot(N, L);
-    float intensity = (NdotL + 1.0f) * 0.5f;
-
-    // 2. Gooch 쉐이딩의 Cool Color / Warm Color 설정
-    // 정점 컬러(input.col)를 베이스로 하여 차가운/따뜻한 톤을 혼합합니다.
-    float3 baseColor = input.col.rgb;
-    float3 coolColor = float3(0.0f, 0.0f, 0.55f) + 0.25f * baseColor; // 파란색 계열
-    float3 warmColor = float3(0.3f, 0.3f, 0.0f) + 0.5f * baseColor;   // 노란/주황색 계열
-
-    // 3. 빛의 강도(intensity)에 따라 Cool/Warm 보간
-    float3 diffuseGooch = lerp(coolColor, warmColor, intensity);
-
-    // 4. (선택 사항) 금속이나 플라스틱 느낌을 강조하기 위한 하이라이트(Specular) 추가
-    float3 R = reflect(-L, N);
-    float spec = pow(max(dot(R, V), 0.0f), 32.0f); // 32는 광택도(Shininess)
-    float3 specular = float3(1.0f, 1.0f, 1.0f) * spec;
-
-    // 최종 색상
-    float3 finalColor = diffuseGooch + specular;
-    
-    return float4(finalColor, input.col.a);
-}
-)";
 
 /*
  * [이론 설명: 윈도우 프로시저 (WndProc)]
@@ -458,9 +388,24 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     pBackBuffer->Release();
 
     // 4. 셰이더 및 버퍼 설정 (이전과 동일한 로직)
-    ID3DBlob* vsBlob, * psBlob;
-    D3DCompile(shaderSource, strlen(shaderSource), nullptr, nullptr, nullptr, "VS", "vs_4_0", 0, 0, &vsBlob, nullptr);
-    D3DCompile(shaderSource, strlen(shaderSource), nullptr, nullptr, nullptr, "PS", "ps_4_0", 0, 0, &psBlob, nullptr);
+    ID3DBlob* vsBlob = nullptr;
+    ID3DBlob* psBlob = nullptr;
+    HRESULT hr = D3DCompileFromFile(
+        L"VertexShader.hlsl",               // 파일 경로
+        nullptr,
+        D3D_COMPILE_STANDARD_FILE_INCLUDE,  // HLSL 내부의 #include를 인식하게 해줌
+        "VS",                               // 엔트리 포인트(함수명)
+        "vs_4_0",                           // 셰이더 타겟 버전
+        0, 0, &vsBlob, nullptr
+    );
+    hr = D3DCompileFromFile(
+        L"PixelShader.hlsl",
+        nullptr,
+        D3D_COMPILE_STANDARD_FILE_INCLUDE,
+        "PS",
+        "ps_4_0",
+        0, 0, &psBlob, nullptr
+    );
 
 
     g_pd3dDevice->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, &g_vShader);
@@ -476,6 +421,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // (이후 CreateInputLayout의 두 번째 인자인 배열 개수도 2에서 3으로 변경해야 합니다)
     g_pd3dDevice->CreateInputLayout(layout, 3, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), &g_pInputLayout);
 
+
     D3D11_BUFFER_DESC bd = {};
     bd.Usage = D3D11_USAGE_DEFAULT;
     bd.ByteWidth = sizeof(ConstantBuffer);
@@ -484,6 +430,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     g_pd3dDevice->CreateBuffer(&bd, nullptr, &g_pConstantBuffer);
 
+    if (vsBlob) vsBlob->Release();
+    if (psBlob) psBlob->Release();
 
     std::vector<GameObject*> gameWorld;
 

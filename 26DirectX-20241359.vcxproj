@@ -128,6 +128,17 @@
   <ItemGroup>
     <ClInclude Include="CPPGameTimer.h" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="Common.hlsli">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="PixelShader.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="VertexShader.hlsl">
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
