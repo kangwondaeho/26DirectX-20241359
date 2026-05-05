@@ -91,7 +91,15 @@ ID3D11VertexShader* g_vShader = nullptr;
 ID3D11PixelShader* g_pShader = nullptr;
 ID3D11Buffer* g_pConstantBuffer = nullptr;
 
+// --- [추가] 깊이 버퍼(Z-Buffer) 전역 변수 ---
+ID3D11Texture2D* g_pDepthStencil = nullptr;           // 깊이 값을 저장할 텍스처 (도화지)
+ID3D11DepthStencilView* g_pDepthStencilView = nullptr; // 텍스처를 렌더 파이프라인에 연결하는 뷰
+
 bool g_isRunning = true;
+
+DirectX::XMVECTOR g_Eye = DirectX::XMVectorSet(0.0f, 0.0f, -5.0f, 0.0f);
+DirectX::XMVECTOR g_At = DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
+DirectX::XMVECTOR g_Up = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
 // 정점 구조체
 struct Vertex {
@@ -102,20 +110,20 @@ struct Vertex {
 
 // 정점 배열 수정 (법선 데이터 추가: 위치 데이터를 정규화한 값)
 Vertex g_sphereVertices[] = {
-    { -0.2628f,  0.4253f,  0.0000f,   -0.5256f,  0.8506f,  0.0000f,   1.0f, 0.0f, 0.0f, 1.0f },
-    {  0.2628f,  0.4253f,  0.0000f,    0.5256f,  0.8506f,  0.0000f,   0.0f, 1.0f, 0.0f, 1.0f },
-    { -0.2628f, -0.4253f,  0.0000f,   -0.5256f, -0.8506f,  0.0000f,   0.0f, 0.0f, 1.0f, 1.0f },
-    {  0.2628f, -0.4253f,  0.0000f,    0.5256f, -0.8506f,  0.0000f,   1.0f, 1.0f, 0.0f, 1.0f },
+    { -0.2628f,  0.4253f,  0.0000f,   -0.5256f,  0.8506f,  0.0000f,   1.0f, 1.0f, 1.0f, 1.0f },
+    {  0.2628f,  0.4253f,  0.0000f,    0.5256f,  0.8506f,  0.0000f,   1.0f, 1.0f, 1.0f, 1.0f },
+    { -0.2628f, -0.4253f,  0.0000f,   -0.5256f, -0.8506f,  0.0000f,   1.0f, 1.0f, 1.0f, 1.0f },
+    {  0.2628f, -0.4253f,  0.0000f,    0.5256f, -0.8506f,  0.0000f,   1.0f, 1.0f, 1.0f, 1.0f },
 
-    {  0.0000f, -0.2628f,  0.4253f,    0.0000f, -0.5256f,  0.8506f,   1.0f, 0.0f, 1.0f, 1.0f },
-    {  0.0000f,  0.2628f,  0.4253f,    0.0000f,  0.5256f,  0.8506f,   0.0f, 1.0f, 1.0f, 1.0f },
+    {  0.0000f, -0.2628f,  0.4253f,    0.0000f, -0.5256f,  0.8506f,   1.0f, 1.0f, 1.0f, 1.0f },
+    {  0.0000f,  0.2628f,  0.4253f,    0.0000f,  0.5256f,  0.8506f,   1.0f, 1.0f, 1.0f, 1.0f },
     {  0.0000f, -0.2628f, -0.4253f,    0.0000f, -0.5256f, -0.8506f,   1.0f, 1.0f, 1.0f, 1.0f },
-    {  0.0000f,  0.2628f, -0.4253f,    0.0000f,  0.5256f, -0.8506f,   0.5f, 0.5f, 0.5f, 1.0f },
+    {  0.0000f,  0.2628f, -0.4253f,    0.0000f,  0.5256f, -0.8506f,   1.0f, 1.0f, 1.0f, 1.0f },
 
-    {  0.4253f,  0.0000f, -0.2628f,    0.8506f,  0.0000f, -0.5256f,   1.0f, 0.5f, 0.0f, 1.0f },
-    {  0.4253f,  0.0000f,  0.2628f,    0.8506f,  0.0000f,  0.5256f,   0.5f, 1.0f, 0.0f, 1.0f },
-    { -0.4253f,  0.0000f, -0.2628f,   -0.8506f,  0.0000f, -0.5256f,   0.0f, 0.5f, 1.0f, 1.0f },
-    { -0.4253f,  0.0000f,  0.2628f,   -0.8506f,  0.0000f,  0.5256f,   0.5f, 0.0f, 1.0f, 1.0f }
+    {  0.4253f,  0.0000f, -0.2628f,    0.8506f,  0.0000f, -0.5256f,   1.0f, 1.0f, 1.0f, 1.0f },
+    {  0.4253f,  0.0000f,  0.2628f,    0.8506f,  0.0000f,  0.5256f,   1.0f, 1.0f, 1.0f, 1.0f },
+    { -0.4253f,  0.0000f, -0.2628f,   -0.8506f,  0.0000f, -0.5256f,   1.0f, 1.0f, 1.0f, 1.0f },
+    { -0.4253f,  0.0000f,  0.2628f,   -0.8506f,  0.0000f,  0.5256f,   1.0f, 1.0f, 1.0f, 1.0f }
 };
 
 WORD g_sphereIndices[] = {
@@ -157,11 +165,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
 class Transform : public Component {
 public:
-    float velocity = 1.0f;
+    float velocity = 2.0f;
+    float rotationSpeed = 2.0f; // [추가] 회전 속도
 
     bool moveUp = false, moveDown = false, moveLeft = false, moveRight = false;
+    bool rotateLeft = false, rotateRight = false; // [추가] 회전 입력 상태
 
     int playerType = 0;
+    float rotationY = 0.0f; // [추가] Y축 회전 각도 (라디안)
 
     float z = 0.0f;
 
@@ -192,6 +203,9 @@ public:
             moveUp = (GetAsyncKeyState('W') & 0x8000);
             moveDown = (GetAsyncKeyState('S') & 0x8000);
         }
+
+        rotateLeft = (GetAsyncKeyState('3') & 0x8000);
+        rotateRight = (GetAsyncKeyState('4') & 0x8000);
     }
 
     void OnUpdate(float dt) override {
@@ -200,10 +214,46 @@ public:
         if (moveRight) pOwner->x += velocity * dt;
         if (moveUp)    pOwner->y += velocity * dt;
         if (moveDown)  pOwner->y -= velocity * dt;
+
+        // [추가] 2. 회전 로직 (라디안 값 누적)
+        if (rotateLeft)  rotationY -= rotationSpeed * dt;
+        if (rotateRight) rotationY += rotationSpeed * dt;
     }
 
     DirectX::XMMATRIX GetWorldMatrix() {
-        return DirectX::XMMatrixTranslation(pOwner->x, pOwner->y, z);
+        // [핵심 수정] 크기(S) * 회전(R) * 이동(T) 순서로 곱해야 로컬 회전이 됩니다!
+
+        // 1. 제자리에서 Y축을 기준으로 회전하는 행렬 생성
+        DirectX::XMMATRIX mRot = DirectX::XMMatrixRotationY(rotationY);
+
+        // 2. 원하는 좌표로 이동하는 행렬 생성
+        DirectX::XMMATRIX mTrans = DirectX::XMMatrixTranslation(pOwner->x, pOwner->y, z);
+
+        // 3. 회전을 먼저 하고, 그 다음에 이동시킵니다 (mRot * mTrans)
+        return mRot * mTrans;
+    }
+};
+
+class CameraController : public Component {
+public:
+    float angle = 0.0f;     // 현재 회전 각도 (라디안)
+    float radius = 5.0f;    // 중심(0,0,0)으로부터의 카메라 거리
+    float speed = 2.0f;     // 카메라 회전 속도
+
+    void Start() override {}
+
+    void OnUpdate(float dt) override {
+        // 1번, 2번 키 입력에 따라 각도 조절
+        if (GetAsyncKeyState('1') & 0x8000) angle -= speed * dt;
+        if (GetAsyncKeyState('2') & 0x8000) angle += speed * dt;
+
+        // 핵심: 삼각함수를 이용해 원주 위의 X, Z 좌표를 구합니다.
+        // 처음 시작 위치가 (0, 0, -5) 이므로, -cos를 사용하여 기준을 맞춥니다.
+        float x = sin(angle) * radius;
+        float z = -cos(angle) * radius;
+
+        // 갱신된 위치를 전역 카메라 변수에 적용
+        g_Eye = DirectX::XMVectorSet(x, 0.0f, z, 0.0f);
     }
 };
 
@@ -215,11 +265,7 @@ public:
     void OnRender() override {
         if (!pOwner->pVBuffer) return;
 
-        DirectX::XMVECTOR Eye = DirectX::XMVectorSet(0.0f, 0.0f, -5.0f, 0.0f);
-        DirectX::XMVECTOR At = DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
-        DirectX::XMVECTOR Up = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-        DirectX::XMMATRIX mView = DirectX::XMMatrixLookAtLH(Eye, At, Up);
-
+        DirectX::XMMATRIX mView = DirectX::XMMatrixLookAtLH(g_Eye, g_At, g_Up);
         DirectX::XMMATRIX mProjection = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV2, 800.0f / 600.0f, 0.01f, 100.0f);
 
         DirectX::XMMATRIX mWorld = DirectX::XMMatrixIdentity();
@@ -237,7 +283,7 @@ public:
         cb.mWorld = DirectX::XMMatrixTranspose(mWorld);
         cb.LightDir = DirectX::XMFLOAT3(0.0f, 0.0f, -1.0f); // 빛이 들어오는 임의의 뱡향
         cb.padding1 = 0.0f;
-        cb.ViewPos = DirectX::XMFLOAT3(0.0f, 0.0f, -5.0f);   // 카메라의 위치 (Eye 변수와 동일)
+        cb.ViewPos = DirectX::XMFLOAT3(DirectX::XMVectorGetX(g_Eye), DirectX::XMVectorGetY(g_Eye), DirectX::XMVectorGetZ(g_Eye));
         cb.padding2 = 0.0f;
 
         g_pImmediateContext->UpdateSubresource(g_pConstantBuffer, 0, nullptr, &cb, 0, 0);
@@ -332,7 +378,13 @@ void Render(float dt, std::vector<GameObject*>& gameWorld) {
     float clearColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
     g_pImmediateContext->ClearRenderTargetView(g_pRenderTargetView, clearColor);
 
-    g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
+    // --- [추가] 3. 매 프레임 깊이 버퍼를 1.0(가장 먼 거리)으로 초기화 ---
+    g_pImmediateContext->ClearDepthStencilView(g_pDepthStencilView, D3D11_CLEAR_DEPTH, 1.0f, 0);
+
+    // --- [수정] 4. 파이프라인에 렌더 타겟과 깊이 스텐실 뷰를 동시에 연결 ---
+    // (기존 nullptr 자리에 g_pDepthStencilView를 넣어줍니다)
+    g_pImmediateContext->OMSetRenderTargets(1, &g_pRenderTargetView, g_pDepthStencilView);
+
     D3D11_VIEWPORT vp = { 0, 0, 800, 600, 0.0f, 1.0f };
     g_pImmediateContext->RSSetViewports(1, &vp);
 
@@ -387,6 +439,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_pRenderTargetView);
     pBackBuffer->Release();
 
+    // --- [추가] 1. 깊이 버퍼 텍스처(Z-Buffer) 생성 ---
+    D3D11_TEXTURE2D_DESC descDepth = {};
+    descDepth.Width = 800;
+    descDepth.Height = 600;
+    descDepth.MipLevels = 1;
+    descDepth.ArraySize = 1;
+    descDepth.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; // 24비트는 깊이(Z), 8비트는 스텐실
+    descDepth.SampleDesc.Count = 1;
+    descDepth.SampleDesc.Quality = 0;
+    descDepth.Usage = D3D11_USAGE_DEFAULT;
+    descDepth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+    g_pd3dDevice->CreateTexture2D(&descDepth, nullptr, &g_pDepthStencil);
+
+    // --- [추가] 2. 깊이 스텐실 뷰(DSV) 생성 ---
+    g_pd3dDevice->CreateDepthStencilView(g_pDepthStencil, nullptr, &g_pDepthStencilView);
+
     // 4. 셰이더 및 버퍼 설정 (이전과 동일한 로직)
     ID3DBlob* vsBlob = nullptr;
     ID3DBlob* psBlob = nullptr;
@@ -399,7 +467,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         0, 0, &vsBlob, nullptr
     );
     hr = D3DCompileFromFile(
-        L"PixelShader.hlsl",
+        L"PixelShader_Lambertian.hlsl",
         nullptr,
         D3D_COMPILE_STANDARD_FILE_INCLUDE,
         "PS",
@@ -449,6 +517,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     GameObject* sysInfo = new GameObject("SystemManager");
     sysInfo->AddComponent(new infoDisplay());
+    sysInfo->AddComponent(new CameraController()); // <-- 새로 만든 카메라 컨트롤러 추가!
     gameWorld.push_back(sysInfo);
 
     CPPGameTimer timer;
@@ -469,6 +538,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     gameWorld.clear();
 
     // 자원 해제
+    if (g_pDepthStencilView) g_pDepthStencilView->Release(); // [추가]
+    if (g_pDepthStencil) g_pDepthStencil->Release();         // [추가]
     if (g_pInputLayout) g_pInputLayout->Release();
     if (g_vShader) g_vShader->Release();
     if (g_pShader) g_pShader->Release();

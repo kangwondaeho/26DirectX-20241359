@@ -124,6 +124,18 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
+    <None Include="PixelShader_Phong.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="VertexShader_Phong.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="VertexShader_Gouroud.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="PixelShader_Lambertian.hlsl">
+      <FileType>Document</FileType>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CPPGameTimer.h" />
@@ -132,10 +144,20 @@
     <None Include="Common.hlsli">
       <FileType>Document</FileType>
     </None>
-    <None Include="PixelShader.hlsl">
+    <None Include="PixelShader_Gooch.hlsl">
       <FileType>Document</FileType>
     </None>
     <None Include="VertexShader.hlsl">
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="PixelShader_Gouroud.hlsl">
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="PixelShader_Flat.hlsl">
       <FileType>Document</FileType>
     </None>
   </ItemGroup>

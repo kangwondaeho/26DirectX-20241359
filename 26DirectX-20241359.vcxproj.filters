@@ -28,10 +28,28 @@
     <None Include="VertexShader.hlsl">
       <Filter>헤더 파일</Filter>
     </None>
-    <None Include="PixelShader.hlsl">
+    <None Include="PixelShader_Gooch.hlsl">
       <Filter>헤더 파일</Filter>
     </None>
     <None Include="Common.hlsli">
+      <Filter>헤더 파일</Filter>
+    </None>
+    <None Include="PixelShader_Lambertian.hlsl">
+      <Filter>헤더 파일</Filter>
+    </None>
+    <None Include="PixelShader_Gouroud.hlsl">
+      <Filter>헤더 파일</Filter>
+    </None>
+    <None Include="VertexShader_Gouroud.hlsl">
+      <Filter>헤더 파일</Filter>
+    </None>
+    <None Include="PixelShader_Phong.hlsl">
+      <Filter>헤더 파일</Filter>
+    </None>
+    <None Include="VertexShader_Phong.hlsl">
+      <Filter>헤더 파일</Filter>
+    </None>
+    <None Include="PixelShader_Flat.hlsl">
       <Filter>헤더 파일</Filter>
     </None>
   </ItemGroup>
